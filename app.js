@@ -1,5 +1,5 @@
-const STORAGE_KEY_LEADS = "avm_radar_leads_v7";
-const STORAGE_KEY_CONFIG = "avm_radar_config_v7";
+const STORAGE_KEY_LEADS = "avm_radar_leads_v8";
+const STORAGE_KEY_CONFIG = "avm_radar_config_v8";
 const SCAN_INTERVAL_SECONDS = 900; // 15 minutos
 const MAX_AGE_HOURS = 168; // Últimos 7 días
 
@@ -7,7 +7,10 @@ let leads = JSON.parse(localStorage.getItem(STORAGE_KEY_LEADS) || "[]");
 let secondsRemaining = SCAN_INTERVAL_SECONDS;
 let currentModalLeadId = null;
 
-// Feeds RSS directos compatibles al 100% con rss2json (sin search.rss bloqueado)
+// Palabras clave por defecto enfocadas en encargos puntuales de programación y automatización
+const DEFAULT_KEYWORDS = "website, web app, database, sql, c#, .net, python, html, dashboard, automation, script, scraper, software, developer, programmer, excel, api, bot, app, fix, build";
+
+// Fuentes RSS directas de encargos puntuales y desarrollo freelance
 const PROJECT_SOURCES = [
   {
     name: "Reddit r/forhire",
@@ -30,14 +33,14 @@ const PROJECT_SOURCES = [
     url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/hiring/new/.rss"
   },
   {
-    name: "WeWorkRemotely Programming",
-    type: "board",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=https://weworkremotely.com/categories/remote-programming-jobs.rss"
+    name: "Reddit r/ProgrammingTasks",
+    type: "reddit",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/ProgrammingTasks/new/.rss"
   },
   {
-    name: "Jobicy Dev & IT",
-    type: "board",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=https://jobicy.com/feed/newjobs"
+    name: "Reddit r/Jobs4Bitcoins",
+    type: "reddit",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/Jobs4Bitcoins/new/.rss"
   }
 ];
 
@@ -63,8 +66,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function loadConfig() {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_CONFIG) || "null");
-  if (saved && saved.keywords) {
+  if (saved && typeof saved.keywords === "string") {
     document.getElementById("inputKeywords").value = saved.keywords;
+  } else {
+    document.getElementById("inputKeywords").value = DEFAULT_KEYWORDS;
   }
 }
 
@@ -116,11 +121,11 @@ function extractBudget(text) {
   return match ? match[1].trim() : null;
 }
 
-function isRelevantOpportunity(title, body, sourceType) {
+function isPuntualProjectOnly(title, body, sourceType) {
   const titleLower = title.toLowerCase();
   const fullText = `${title} ${body}`.toLowerCase();
 
-  // En Reddit: exigir que sea cliente buscando ([Hiring] / [Task]) y jamás [For Hire]
+  // 1. Exigir publicación de cliente buscando ([Hiring] / [Task]) y jamás [For Hire]
   if (sourceType === "reddit") {
     const isClientAsking =
       titleLower.includes("[hiring]") ||
@@ -134,10 +139,27 @@ function isRelevantOpportunity(title, body, sourceType) {
     if (!isClientAsking || isSelfPromo) return false;
   }
 
-  // Excluir Costa Rica / SICOP y puestos presenciales
+  // 2. Bloqueo estricto de plazas permanentes, empleos de tiempo completo, restricciones de país y Costa Rica/SICOP
   const blockedTerms = [
+    "permanent",
+    "full-time",
+    "full time",
+    "fulltime",
+    "40 hours",
+    "40 hrs",
     "onsite",
     "on-site",
+    "hybrid",
+    "10+ years",
+    "staff engineer",
+    "principal engineer",
+    "annual salary",
+    "per year",
+    "/yr",
+    "w2",
+    "us citizens only",
+    "uk only",
+    "india",
     "costa rica",
     "san josé",
     "sicop"
@@ -146,7 +168,7 @@ function isRelevantOpportunity(title, body, sourceType) {
     return false;
   }
 
-  // Coincidencia con palabras clave técnicas (si el campo está vacío, acepta todo software/web)
+  // 3. Coincidencia con palabras clave técnicas (si el campo está vacío, acepta todo encargo válido)
   const keywords = getKeywordsArray();
   if (keywords.length === 0) return true;
   return keywords.some(kw => fullText.includes(kw));
@@ -156,7 +178,7 @@ async function runGlobalScan() {
   const logEl = document.getElementById("lastScanLog");
   const btn = document.getElementById("btnScanNow");
   btn.disabled = true;
-  logEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-primary"></i> Rastreando tableros internacionales en tiempo real...`;
+  logEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-primary"></i> Rastreando proyectos puntuales en tiempo real...`;
 
   let newCount = 0;
   let inspectedCount = 0;
@@ -176,7 +198,7 @@ async function runGlobalScan() {
           if (!isNaN(pubDate) && (nowMs - pubDate > maxAgeMs)) continue;
 
           const cleanDesc = stripHtml(item.description || item.content || "");
-          if (!isRelevantOpportunity(item.title, cleanDesc, src.type)) continue;
+          if (!isPuntualProjectOnly(item.title, cleanDesc, src.type)) continue;
 
           const uniqueId = `opp_${btoa(unescape(encodeURIComponent(item.link))).slice(0, 28)}`;
           if (leads.some(l => l.id === uniqueId)) continue;
@@ -209,7 +231,7 @@ async function runGlobalScan() {
   updateStats();
 
   const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  logEl.innerHTML = `Último rastreo: <strong>${timeStr}</strong> (${inspectedCount} revisadas) — <span class="text-success fw-bold">+${newCount} oportunidades detectadas</span>`;
+  logEl.innerHTML = `Último rastreo: <strong>${timeStr}</strong> (${inspectedCount} revisadas) — <span class="text-success fw-bold">+${newCount} proyectos puntuales</span>`;
   btn.disabled = false;
 }
 
@@ -241,7 +263,7 @@ function renderLeads() {
       <div class="col-12">
         <div class="alert alert-light border text-center py-5 text-muted">
           <i class="fa-solid fa-radar fa-2x mb-2 text-secondary"></i>
-          <p class="mb-0">No hay oportunidades nuevas en este momento. El radar sigue vigilando cada 15 minutos.</p>
+          <p class="mb-0">No hay proyectos puntuales nuevos en este momento. El radar sigue vigilando cada 15 minutos.</p>
         </div>
       </div>`;
     return;
