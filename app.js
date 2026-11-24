@@ -7,23 +7,23 @@ let leads = JSON.parse(localStorage.getItem(STORAGE_KEY_LEADS) || "[]");
 let secondsRemaining = SCAN_INTERVAL_SECONDS;
 let currentModalLeadId = null;
 
-// ÚNICAMENTE tableros de encargos puntuales y desarrollo freelance por proyecto
+// ÚNICAMENTE tableros de encargos puntuales y desarrollo freelance por proyecto (codificados para rss2json)
 const PROJECT_SOURCES = [
   {
-    name: "Reddit r/forhire (Proyectos)",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/forhire/new/.rss"
+    name: "Reddit r/forhire [Hiring]",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent("https://www.reddit.com/r/forhire/search.rss?q=title%3Ahiring&restrict_sr=1&sort=new")
   },
   {
-    name: "Reddit r/freelance_forhire (Proyectos)",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/freelance_forhire/new/.rss"
+    name: "Reddit r/freelance_forhire [Hiring]",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent("https://www.reddit.com/r/freelance_forhire/search.rss?q=title%3Ahiring&restrict_sr=1&sort=new")
   },
   {
-    name: "Reddit r/slavelabour (Tareas Rápidas)",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/slavelabour/new/.rss"
+    name: "Reddit r/slavelabour [Task]",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent("https://www.reddit.com/r/slavelabour/search.rss?q=title%3Atask&restrict_sr=1&sort=new")
   },
   {
-    name: "Reddit r/hiring (Contratos Cortos)",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/hiring/new/.rss"
+    name: "Reddit r/hiring [Hiring]",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent("https://www.reddit.com/r/hiring/search.rss?q=title%3Ahiring&restrict_sr=1&sort=new")
   }
 ];
 
