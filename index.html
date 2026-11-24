@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Radar Global AVM | Prospección Internacional de Software</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="bg-light">
+
+  <!-- Barra Superior -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm sticky-top">
+    <div class="container-fluid px-4">
+      <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="#">
+        <i class="fa-solid fa-satellite-dish text-info"></i>
+        <span>Radar Global AVM</span>
+        <span class="badge bg-info text-dark fs-6">24/7 Live</span>
+      </a>
+      <div class="d-flex align-items-center gap-3 text-white small">
+        <span id="statusIndicator" class="d-flex align-items-center gap-1">
+          <i class="fa-solid fa-circle text-success"></i> Motor Activo
+        </span>
+        <span class="border-start ps-3">
+          Próximo rastreo: <strong id="countdownTimer" class="text-warning">15:00</strong>
+        </span>
+        <button id="btnScanNow" class="btn btn-sm btn-info fw-semibold">
+          <i class="fa-solid fa-rotate"></i> Rastrear Ahora
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container-fluid px-4 py-4">
+    <!-- Métricas del Día -->
+    <div class="row g-3 mb-4">
+      <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100 border-start border-primary border-4">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase fw-bold">Nuevas Oportunidades</div>
+            <div class="fs-2 fw-bold text-primary" id="statNuevas">0</div>
+            <div class="small text-muted">Listas para revisar</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100 border-start border-success border-4">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase fw-bold">Con Correo Directo</div>
+            <div class="fs-2 fw-bold text-success" id="statConCorreo">0</div>
+            <div class="small text-muted">Contacto real anti-fantasma</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100 border-start border-info border-4">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase fw-bold">Propuestas Enviadas</div>
+            <div class="fs-2 fw-bold text-info" id="statEnviadas">0</div>
+            <div class="small text-muted">Histórico acumulado</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="card border-0 shadow-sm h-100 border-start border-warning border-4">
+          <div class="card-body">
+            <div class="text-muted small text-uppercase fw-bold">Proyectos Ganados</div>
+            <div class="fs-2 fw-bold text-warning" id="statGanados">0</div>
+            <div class="small text-muted">Clientes internacionales</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel de Filtros y Respaldo -->
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-body">
+        <div class="row g-3 align-items-end">
+          <div class="col-md-4">
+            <label class="form-label fw-semibold small">Palabras Clave de Búsqueda (separadas por coma)</label>
+            <input type="text" id="inputKeywords" class="form-control form-control-sm"
+              value="website, web app, database, sql, c#, .net, python, html, dashboard, automation, system, developer, software" />
+          </div>
+          <div class="col-md-2">
+            <label class="form-label fw-semibold small">Filtrar por Estado</label>
+            <select id="filterStatus" class="form-select form-select-sm">
+              <option value="nuevo" selected>🟡 Nuevas (Pendientes)</option>
+              <option value="todos">📋 Todas en Histórico</option>
+              <option value="enviado">🔵 Propuesta Enviada</option>
+              <option value="ganado">🟢 Ganadas</option>
+              <option value="descartado">⚫ Descartadas</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <div class="form-check mb-1">
+              <input class="form-check-input" type="checkbox" id="chkOnlyEmail" />
+              <label class="form-check-label small fw-semibold" for="chkOnlyEmail">
+                Solo con Correo Directo
+              </label>
+            </div>
+          </div>
+          <div class="col-md-4 text-md-end d-flex gap-2 justify-content-md-end flex-wrap">
+            <button id="btnSaveConfig" class="btn btn-sm btn-outline-primary">
+              <i class="fa-solid fa-floppy-disk"></i> Guardar Filtros
+            </button>
+            <button id="btnExportJson" class="btn btn-sm btn-outline-secondary">
+              <i class="fa-solid fa-download"></i> Respaldar JSON
+            </button>
+            <label class="btn btn-sm btn-outline-secondary mb-0">
+              <i class="fa-solid fa-upload"></i> Restaurar
+              <input type="file" id="fileImportJson" accept=".json" hidden />
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bitácora del Último Rastreo -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="mb-0 fw-bold text-dark">
+        <i class="fa-solid fa-list-check text-primary me-2"></i>Reporte de Oportunidades Detectadas
+      </h5>
+      <span id="lastScanLog" class="small text-muted">Iniciando primer rastreo...</span>
+    </div>
+
+    <!-- Lista de Resultados -->
+    <div id="leadsContainer" class="row g-3"></div>
+  </div>
+
+  <!-- Modal Generador de Propuesta -->
+  <div class="modal fade" id="proposalModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header bg-dark text-white">
+          <h5 class="modal-title"><i class="fa-solid fa-paper-plane text-info me-2"></i>Generador de Propuesta Internacional (AVM)</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label small fw-bold">Asunto Sugerido (Subject):</label>
+            <input type="text" id="modalSubject" class="form-control form-control-sm" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Mensaje Listo para Enviar (Inglés Profesional):</label>
+            <textarea id="modalBody" class="form-control" rows="10"></textarea>
+          </div>
+          <div id="modalEmailBox" class="alert alert-success py-2 small d-none"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+          <button type="button" id="btnCopyProposal" class="btn btn-primary btn-sm">
+            <i class="fa-solid fa-copy"></i> Copiar Propuesta y Marcar como Enviada
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
