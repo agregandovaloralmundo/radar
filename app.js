@@ -1,5 +1,5 @@
-const STORAGE_KEY_LEADS = "avm_radar_leads_v6";
-const STORAGE_KEY_CONFIG = "avm_radar_config_v6";
+const STORAGE_KEY_LEADS = "avm_radar_leads_v7";
+const STORAGE_KEY_CONFIG = "avm_radar_config_v7";
 const SCAN_INTERVAL_SECONDS = 900; // 15 minutos
 const MAX_AGE_HOURS = 168; // Últimos 7 días
 
@@ -7,23 +7,37 @@ let leads = JSON.parse(localStorage.getItem(STORAGE_KEY_LEADS) || "[]");
 let secondsRemaining = SCAN_INTERVAL_SECONDS;
 let currentModalLeadId = null;
 
-// ÚNICAMENTE tableros de encargos puntuales y desarrollo freelance por proyecto (codificados para rss2json)
+// Feeds RSS directos compatibles al 100% con rss2json (sin search.rss bloqueado)
 const PROJECT_SOURCES = [
   {
-    name: "Reddit r/forhire [Hiring]",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent("https://www.reddit.com/r/forhire/search.rss?q=title%3Ahiring&restrict_sr=1&sort=new")
+    name: "Reddit r/forhire",
+    type: "reddit",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/forhire/new/.rss"
   },
   {
-    name: "Reddit r/freelance_forhire [Hiring]",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent("https://www.reddit.com/r/freelance_forhire/search.rss?q=title%3Ahiring&restrict_sr=1&sort=new")
+    name: "Reddit r/freelance_forhire",
+    type: "reddit",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/freelance_forhire/new/.rss"
   },
   {
-    name: "Reddit r/slavelabour [Task]",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent("https://www.reddit.com/r/slavelabour/search.rss?q=title%3Atask&restrict_sr=1&sort=new")
+    name: "Reddit r/slavelabour",
+    type: "reddit",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/slavelabour/new/.rss"
   },
   {
-    name: "Reddit r/hiring [Hiring]",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent("https://www.reddit.com/r/hiring/search.rss?q=title%3Ahiring&restrict_sr=1&sort=new")
+    name: "Reddit r/hiring",
+    type: "reddit",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/hiring/new/.rss"
+  },
+  {
+    name: "WeWorkRemotely Programming",
+    type: "board",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=https://weworkremotely.com/categories/remote-programming-jobs.rss"
+  },
+  {
+    name: "Jobicy Dev & IT",
+    type: "board",
+    url: "https://api.rss2json.com/v1/api.json?rss_url=https://jobicy.com/feed/newjobs"
   }
 ];
 
@@ -102,51 +116,39 @@ function extractBudget(text) {
   return match ? match[1].trim() : null;
 }
 
-function isPuntualProjectOnly(title, body) {
+function isRelevantOpportunity(title, body, sourceType) {
   const titleLower = title.toLowerCase();
   const fullText = `${title} ${body}`.toLowerCase();
 
-  // 1. Obligatorio: debe ser un cliente pidiendo algo ([Hiring] o [Task]), NUNCA [For Hire] / [Offer]
-  const isClientAsking =
-    titleLower.includes("[hiring]") ||
-    titleLower.includes("(hiring)") ||
-    titleLower.includes("[task]");
-  const isSelfPromo =
-    titleLower.includes("[for hire]") ||
-    titleLower.includes("(for hire)") ||
-    titleLower.includes("[offer]");
+  // En Reddit: exigir que sea cliente buscando ([Hiring] / [Task]) y jamás [For Hire]
+  if (sourceType === "reddit") {
+    const isClientAsking =
+      titleLower.includes("[hiring]") ||
+      titleLower.includes("(hiring)") ||
+      titleLower.includes("[task]");
+    const isSelfPromo =
+      titleLower.includes("[for hire]") ||
+      titleLower.includes("(for hire)") ||
+      titleLower.includes("[offer]");
 
-  if (!isClientAsking || isSelfPromo) return false;
+    if (!isClientAsking || isSelfPromo) return false;
+  }
 
-  // 2. Bloqueo estricto de empleos de tiempo completo, salarios fijos o puestos presenciales
-  const fullTimeBlacklist = [
-    "full-time",
-    "full time",
-    "fulltime",
-    "40 hours",
-    "40 hrs",
-    "part-time",
-    "part time",
+  // Excluir Costa Rica / SICOP y puestos presenciales
+  const blockedTerms = [
     "onsite",
     "on-site",
-    "hybrid",
-    "staff engineer",
-    "senior engineer",
-    "lead engineer",
-    "annual salary",
-    "per year",
-    "/yr",
-    "w2",
     "costa rica",
     "san josé",
     "sicop"
   ];
-  if (fullTimeBlacklist.some(term => fullText.includes(term))) {
+  if (blockedTerms.some(term => fullText.includes(term))) {
     return false;
   }
 
-  // 3. Coincidencia con desarrollo de programas, scripts, webs o bases de datos
+  // Coincidencia con palabras clave técnicas (si el campo está vacío, acepta todo software/web)
   const keywords = getKeywordsArray();
+  if (keywords.length === 0) return true;
   return keywords.some(kw => fullText.includes(kw));
 }
 
@@ -154,7 +156,7 @@ async function runGlobalScan() {
   const logEl = document.getElementById("lastScanLog");
   const btn = document.getElementById("btnScanNow");
   btn.disabled = true;
-  logEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-primary"></i> Buscando proyectos puntuales (sin tiempo completo)...`;
+  logEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-primary"></i> Rastreando tableros internacionales en tiempo real...`;
 
   let newCount = 0;
   let inspectedCount = 0;
@@ -170,13 +172,13 @@ async function runGlobalScan() {
       if (Array.isArray(data.items)) {
         for (const item of data.items) {
           inspectedCount++;
-          const pubDate = new Date(item.pubDate.replace(" ", "T") + "Z").getTime();
+          const pubDate = new Date((item.pubDate || "").replace(" ", "T") + "Z").getTime();
           if (!isNaN(pubDate) && (nowMs - pubDate > maxAgeMs)) continue;
 
           const cleanDesc = stripHtml(item.description || item.content || "");
-          if (!isPuntualProjectOnly(item.title, cleanDesc)) continue;
+          if (!isRelevantOpportunity(item.title, cleanDesc, src.type)) continue;
 
-          const uniqueId = `proj_${btoa(unescape(encodeURIComponent(item.link))).slice(0, 28)}`;
+          const uniqueId = `opp_${btoa(unescape(encodeURIComponent(item.link))).slice(0, 28)}`;
           if (leads.some(l => l.id === uniqueId)) continue;
 
           const emails = extractEmails(`${item.title} ${cleanDesc}`);
@@ -186,7 +188,7 @@ async function runGlobalScan() {
             id: uniqueId,
             source: src.name,
             title: item.title,
-            description: cleanDesc.slice(0, 600) || "Ver especificaciones del programa en el enlace original.",
+            description: cleanDesc.slice(0, 600) || "Ver especificaciones del proyecto en el enlace original.",
             url: item.link,
             author: item.author || "Client",
             emails: emails,
@@ -207,10 +209,7 @@ async function runGlobalScan() {
   updateStats();
 
   const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const modeWarning = window.location.protocol === "file:"
-    ? ` <span class="text-danger fw-bold">(Súbalo a GitHub Pages para activar los feeds RSS)</span>`
-    : "";
-  logEl.innerHTML = `Último rastreo: <strong>${timeStr}</strong> (${inspectedCount} revisadas) — <span class="text-success fw-bold">+${newCount} proyectos puntuales</span>${modeWarning}`;
+  logEl.innerHTML = `Último rastreo: <strong>${timeStr}</strong> (${inspectedCount} revisadas) — <span class="text-success fw-bold">+${newCount} oportunidades detectadas</span>`;
   btn.disabled = false;
 }
 
@@ -242,7 +241,7 @@ function renderLeads() {
       <div class="col-12">
         <div class="alert alert-light border text-center py-5 text-muted">
           <i class="fa-solid fa-radar fa-2x mb-2 text-secondary"></i>
-          <p class="mb-0">No hay proyectos puntuales nuevos en este momento. El radar sigue vigilando cada 15 minutos.</p>
+          <p class="mb-0">No hay oportunidades nuevas en este momento. El radar sigue vigilando cada 15 minutos.</p>
         </div>
       </div>`;
     return;
