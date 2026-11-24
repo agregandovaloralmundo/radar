@@ -1,5 +1,5 @@
-const STORAGE_KEY_LEADS = "avm_radar_leads_v8";
-const STORAGE_KEY_CONFIG = "avm_radar_config_v8";
+const STORAGE_KEY_LEADS = "avm_radar_leads_v9";
+const STORAGE_KEY_CONFIG = "avm_radar_config_v9";
 const SCAN_INTERVAL_SECONDS = 900; // 15 minutos
 const MAX_AGE_HOURS = 168; // Últimos 7 días
 
@@ -7,40 +7,51 @@ let leads = JSON.parse(localStorage.getItem(STORAGE_KEY_LEADS) || "[]");
 let secondsRemaining = SCAN_INTERVAL_SECONDS;
 let currentModalLeadId = null;
 
-// Palabras clave por defecto enfocadas en encargos puntuales de programación y automatización
-const DEFAULT_KEYWORDS = "website, web app, database, sql, c#, .net, python, html, dashboard, automation, script, scraper, software, developer, programmer, excel, api, bot, app, fix, build";
+const DEFAULT_KEYWORDS = "website, web app, database, sql, c#, .net, python, html, dashboard, automation, script, scraper, software, developer, programmer, excel, api, bot, app, backend, full stack";
 
-// Fuentes RSS directas de encargos puntuales y desarrollo freelance
-const PROJECT_SOURCES = [
+// 1. APIs JSON directas de desarrollo de software (sin pasar por rss2json)
+const DIRECT_JSON_SOURCES = [
+  {
+    name: "Remotive Software Dev",
+    url: "https://remotive.com/api/remote-jobs?category=software-dev&limit=40",
+    parse: (data) => (data.jobs || []).map(j => ({
+      title: j.title,
+      description: j.description || "",
+      link: j.url,
+      author: j.company_name || "Client",
+      pubDate: j.publication_date
+    }))
+  },
+  {
+    name: "RemoteOK Dev",
+    url: "https://remoteok.com/api?tag=dev",
+    parse: (data) => (Array.isArray(data) ? data.slice(1, 41) : []).map(j => ({
+      title: j.position || "",
+      description: j.description || "",
+      link: j.url || `https://remoteok.com/remote-jobs/${j.id}`,
+      author: j.company || "Client",
+      pubDate: j.date
+    }))
+  }
+];
+
+// 2. Feeds RSS de encargos puntuales en Reddit
+const REDDIT_RSS_SOURCES = [
   {
     name: "Reddit r/forhire",
-    type: "reddit",
     url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/forhire/new/.rss"
   },
   {
     name: "Reddit r/freelance_forhire",
-    type: "reddit",
     url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/freelance_forhire/new/.rss"
   },
   {
     name: "Reddit r/slavelabour",
-    type: "reddit",
     url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/slavelabour/new/.rss"
   },
   {
-    name: "Reddit r/hiring",
-    type: "reddit",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/hiring/new/.rss"
-  },
-  {
     name: "Reddit r/ProgrammingTasks",
-    type: "reddit",
     url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/ProgrammingTasks/new/.rss"
-  },
-  {
-    name: "Reddit r/Jobs4Bitcoins",
-    type: "reddit",
-    url: "https://api.rss2json.com/v1/api.json?rss_url=https://www.reddit.com/r/Jobs4Bitcoins/new/.rss"
   }
 ];
 
@@ -112,7 +123,7 @@ function extractEmails(text) {
   const regex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
   const matches = text.match(regex) || [];
   return [...new Set(matches.map(e => e.toLowerCase()))]
-    .filter(e => !e.includes("example.com") && !e.includes("domain.com"));
+    .filter(e => !e.includes("example.com") && !e.includes("domain.com") && !e.includes("sentry.io"));
 }
 
 function extractBudget(text) {
@@ -121,12 +132,13 @@ function extractBudget(text) {
   return match ? match[1].trim() : null;
 }
 
-function isPuntualProjectOnly(title, body, sourceType) {
+function isValidOpportunity(title, body, isReddit) {
+  if (!title) return false;
   const titleLower = title.toLowerCase();
   const fullText = `${title} ${body}`.toLowerCase();
 
-  // 1. Exigir publicación de cliente buscando ([Hiring] / [Task]) y jamás [For Hire]
-  if (sourceType === "reddit") {
+  // En Reddit: exigir que sea cliente buscando ([Hiring] / [Task]) y jamás [For Hire]
+  if (isReddit) {
     const isClientAsking =
       titleLower.includes("[hiring]") ||
       titleLower.includes("(hiring)") ||
@@ -139,27 +151,10 @@ function isPuntualProjectOnly(title, body, sourceType) {
     if (!isClientAsking || isSelfPromo) return false;
   }
 
-  // 2. Bloqueo estricto de plazas permanentes, empleos de tiempo completo, restricciones de país y Costa Rica/SICOP
+  // Excluir Costa Rica / SICOP y puestos presenciales
   const blockedTerms = [
-    "permanent",
-    "full-time",
-    "full time",
-    "fulltime",
-    "40 hours",
-    "40 hrs",
     "onsite",
     "on-site",
-    "hybrid",
-    "10+ years",
-    "staff engineer",
-    "principal engineer",
-    "annual salary",
-    "per year",
-    "/yr",
-    "w2",
-    "us citizens only",
-    "uk only",
-    "india",
     "costa rica",
     "san josé",
     "sicop"
@@ -168,7 +163,6 @@ function isPuntualProjectOnly(title, body, sourceType) {
     return false;
   }
 
-  // 3. Coincidencia con palabras clave técnicas (si el campo está vacío, acepta todo encargo válido)
   const keywords = getKeywordsArray();
   if (keywords.length === 0) return true;
   return keywords.some(kw => fullText.includes(kw));
@@ -178,14 +172,53 @@ async function runGlobalScan() {
   const logEl = document.getElementById("lastScanLog");
   const btn = document.getElementById("btnScanNow");
   btn.disabled = true;
-  logEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-primary"></i> Rastreando proyectos puntuales en tiempo real...`;
+  logEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-primary"></i> Rastreando APIs directas de software y Reddit...`;
 
   let newCount = 0;
   let inspectedCount = 0;
   const nowMs = Date.now();
   const maxAgeMs = MAX_AGE_HOURS * 3600 * 1000;
 
-  for (const src of PROJECT_SOURCES) {
+  // A. Consultar APIs JSON directas (Remotive y RemoteOK)
+  for (const src of DIRECT_JSON_SOURCES) {
+    try {
+      const resp = await fetch(src.url);
+      if (!resp.ok) continue;
+      const rawData = await resp.json();
+      const items = src.parse(rawData);
+
+      for (const item of items) {
+        inspectedCount++;
+        const pubDate = new Date(item.pubDate || "").getTime();
+        if (!isNaN(pubDate) && (nowMs - pubDate > maxAgeMs)) continue;
+
+        const cleanDesc = stripHtml(item.description);
+        if (!isValidOpportunity(item.title, cleanDesc, false)) continue;
+
+        const uniqueId = `api_${btoa(unescape(encodeURIComponent(item.link))).slice(0, 28)}`;
+        if (leads.some(l => l.id === uniqueId)) continue;
+
+        leads.unshift({
+          id: uniqueId,
+          source: src.name,
+          title: item.title,
+          description: cleanDesc.slice(0, 550) || "Ver detalles del proyecto en el enlace original.",
+          url: item.link,
+          author: item.author,
+          emails: extractEmails(`${item.title} ${cleanDesc}`),
+          budget: extractBudget(`${item.title} ${cleanDesc}`),
+          createdAt: item.pubDate || new Date().toISOString(),
+          status: "nuevo"
+        });
+        newCount++;
+      }
+    } catch (err) {
+      console.warn(`Error en ${src.name}:`, err);
+    }
+  }
+
+  // B. Consultar Reddit RSS
+  for (const src of REDDIT_RSS_SOURCES) {
     try {
       const resp = await fetch(src.url);
       if (!resp.ok) continue;
@@ -198,23 +231,20 @@ async function runGlobalScan() {
           if (!isNaN(pubDate) && (nowMs - pubDate > maxAgeMs)) continue;
 
           const cleanDesc = stripHtml(item.description || item.content || "");
-          if (!isPuntualProjectOnly(item.title, cleanDesc, src.type)) continue;
+          if (!isValidOpportunity(item.title, cleanDesc, true)) continue;
 
-          const uniqueId = `opp_${btoa(unescape(encodeURIComponent(item.link))).slice(0, 28)}`;
+          const uniqueId = `red_${btoa(unescape(encodeURIComponent(item.link))).slice(0, 28)}`;
           if (leads.some(l => l.id === uniqueId)) continue;
-
-          const emails = extractEmails(`${item.title} ${cleanDesc}`);
-          const budget = extractBudget(`${item.title} ${cleanDesc}`);
 
           leads.unshift({
             id: uniqueId,
             source: src.name,
             title: item.title,
-            description: cleanDesc.slice(0, 600) || "Ver especificaciones del proyecto en el enlace original.",
+            description: cleanDesc.slice(0, 550) || "Ver especificaciones en el enlace original.",
             url: item.link,
             author: item.author || "Client",
-            emails: emails,
-            budget: budget,
+            emails: extractEmails(`${item.title} ${cleanDesc}`),
+            budget: extractBudget(`${item.title} ${cleanDesc}`),
             createdAt: item.pubDate || new Date().toISOString(),
             status: "nuevo"
           });
@@ -231,7 +261,7 @@ async function runGlobalScan() {
   updateStats();
 
   const timeStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  logEl.innerHTML = `Último rastreo: <strong>${timeStr}</strong> (${inspectedCount} revisadas) — <span class="text-success fw-bold">+${newCount} proyectos puntuales</span>`;
+  logEl.innerHTML = `Último rastreo: <strong>${timeStr}</strong> (${inspectedCount} revisadas) — <span class="text-success fw-bold">+${newCount} oportunidades detectadas</span>`;
   btn.disabled = false;
 }
 
@@ -263,7 +293,7 @@ function renderLeads() {
       <div class="col-12">
         <div class="alert alert-light border text-center py-5 text-muted">
           <i class="fa-solid fa-radar fa-2x mb-2 text-secondary"></i>
-          <p class="mb-0">No hay proyectos puntuales nuevos en este momento. El radar sigue vigilando cada 15 minutos.</p>
+          <p class="mb-0">No hay oportunidades nuevas con ese filtro. Prueba cambiar "Filtrar por Estado" o presiona "Rastrear Ahora".</p>
         </div>
       </div>`;
     return;
@@ -277,7 +307,7 @@ function renderLeads() {
 
     const emailBadge = lead.emails && lead.emails.length > 0
       ? `<span class="badge bg-success"><i class="fa-solid fa-envelope-circle-check me-1"></i>${lead.emails[0]}</span>`
-      : `<span class="badge bg-secondary bg-opacity-25 text-dark">Contactar en publicación</span>`;
+      : `<span class="badge bg-secondary bg-opacity-25 text-dark">Aplicar en publicación</span>`;
 
     const budgetBadge = lead.budget
       ? `<span class="badge bg-warning text-dark"><i class="fa-solid fa-dollar-sign"></i> ${escapeHtml(lead.budget)}</span>`
